@@ -29,6 +29,7 @@ import unittest
 from decimal import Decimal
 from service.models import Product, Category, db
 from service import app
+from service.models import DataValidationError
 from tests.factories import ProductFactory
 
 DATABASE_URI = os.getenv(
@@ -104,3 +105,141 @@ class TestProductModel(unittest.TestCase):
     #
     # ADD YOUR TEST CASES HERE
     #
+    def test_read_a_product(self):
+        """It should Read a Product"""
+        product = ProductFactory()
+        product.id = None
+        product.create()
+        self.assertIsNotNone(product.id)
+        # Fetch it back
+        found_product = Product.find(product.id)
+        self.assertEqual(found_product.id, product.id)
+        self.assertEqual(found_product.name, product.name)
+        self.assertEqual(found_product.description, product.description)
+        self.assertEqual(found_product.price, product.price)
+
+    def test_update_a_product(self):
+        """It should Update a Product"""
+        product = ProductFactory()
+        product.id = None
+        product.create()
+        self.assertIsNotNone(product.id)
+        # Change it an save it
+        product.description = "testing"
+        original_id = product.id
+        product.update()
+        self.assertEqual(product.id, original_id)
+        self.assertEqual(product.description, "testing")
+        # Fetch it back and make sure the id hasn't changed
+        # but the data did change
+        products = Product.all()
+        self.assertEqual(len(products), 1)
+        self.assertEqual(products[0].id, original_id)
+        self.assertEqual(products[0].description, "testing")
+
+    def test_delete_a_product(self):
+        """It should Delete a Product"""
+        product = ProductFactory()
+        product.create()
+        self.assertEqual(len(Product.all()), 1)
+        # delete the product and make sure it isn't in the database
+        product.delete()
+        self.assertEqual(len(Product.all()), 0)
+
+    def test_list_all_products(self):
+        """It should List all Products in the database"""
+        products = Product.all()
+        self.assertEqual(products, [])
+        # Create 5 Products
+        for _ in range(5):
+            product = ProductFactory()
+            product.create()
+        # See if we get back 5 products
+        products = Product.all()
+        self.assertEqual(len(products), 5)
+
+    def test_find_by_name(self):
+        """It should Find a Product by Name"""
+        products = ProductFactory.create_batch(5)
+        for product in products:
+            product.create()
+        name = products[0].name
+        count = len([product for product in products if product.name == name])
+        found = Product.find_by_name(name)
+        self.assertEqual(found.count(), count)
+        for product in found:
+            self.assertEqual(product.name, name)
+
+    def test_find_by_availability(self):
+        """It should Find Products by Availability"""
+        products = ProductFactory.create_batch(10)
+        for product in products:
+            product.create()
+        available = products[0].available
+        count = len([product for product in products if product.available == available])
+        found = Product.find_by_availability(available)
+        self.assertEqual(found.count(), count)
+        for product in found:
+            self.assertEqual(product.available, available)
+
+    def test_find_by_category(self):
+        """It should Find Products by Category"""
+        products = ProductFactory.create_batch(10)
+        for product in products:
+            product.create()
+        category = products[0].category
+        count = len([product for product in products if product.category == category])
+        found = Product.find_by_category(category)
+        self.assertEqual(found.count(), count)
+        for product in found:
+            self.assertEqual(product.category, category)
+
+    def test_deserialize_with_invalid_data(self):
+        """It should raise DataValidationError when given invalid data"""
+        product = Product()
+        # Missing required fields or invalid input should fail
+        with self.assertRaises(DataValidationError):
+            product.deserialize({"name": "Hammer"})
+
+    def test_update_without_id(self):
+        """It should raise DataValidationError when updating without an ID"""
+        product = Product(name="Test", category="tools", available=True)
+        product.id = None  # Simulate missing id
+        with self.assertRaises(DataValidationError):
+            product.update()
+
+    def test_repr_includes_name(self):
+        """It should show name in string representation"""
+        product = Product(name="Wrench", category="tools", available=True)
+        rep = repr(product)
+        self.assertIn("Wrench", rep)
+
+    def test_find_by_price_with_string(self):
+        """It should Find Products by Price when given a string"""
+        product = ProductFactory(price=Decimal("12.50"))
+        product.create()
+        found = Product.find_by_price("12.50")
+        self.assertEqual(found.count(), 1)
+        for item in found:
+            self.assertEqual(item.price, Decimal("12.50"))
+
+    def test_deserialize_raises_type_error(self):
+        """It should raise DataValidationError when given a non-dict type"""
+        product = ProductFactory.build()
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(None)  # passing None instead of dict
+        self.assertIn("Invalid product: body of request contained bad or no data", str(context.exception))
+
+    def test_deserialize_invalid_boolean(self):
+        """It should raise DataValidationError when available is not a boolean"""
+        product = ProductFactory.build()
+        bad_data = {
+            "name": "Test",
+            "description": "Desc",
+            "price": "12.50",
+            "available": "yes",  # Invalid boolean
+            "category": "CLOTHS"
+        }
+        with self.assertRaises(DataValidationError) as context:
+            product.deserialize(bad_data)
+        self.assertIn("Invalid type for boolean [available]:", str(context.exception))
